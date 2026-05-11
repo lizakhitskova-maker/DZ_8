@@ -1,0 +1,111 @@
+---
+- name: Развёртывание контейнера безопасности грид-системы
+  hosts: grid_servers
+  become: yes
+  vars_files:
+    - vars.yml
+
+  tasks:
+    # 1. Установка Python и pip (если не установлены)
+    - name: Установить Python3 и pip
+      apt:
+        name:
+          - python3
+          - python3-pip
+          - python3-venv
+          - git
+        state: present
+        update_cache: yes
+
+    # 2. Клонирование репозитория с проектом
+    - name: Клонировать репозиторий
+      git:
+        repo: "{{ repo_url }}"
+        dest: /opt/grid-container
+        version: "{{ repo_version }}"
+        force: yes
+
+    # 3. Создание виртуального окружения
+    - name: Создать виртуальное окружение
+      command: python3 -m venv /opt/grid-container/venv
+      args:
+        creates: /opt/grid-container/venv/bin/activate
+
+    # 4. Установка зависимостей из requirements.txt
+    - name: Установить зависимости из requirements.txt
+      pip:
+        requirements: /opt/grid-container/requirements.txt
+        virtualenv: /opt/grid-container/venv
+
+    # 5. Копирование настроек settings.py из шаблона (с подстановкой переменных)
+    - name: Скопировать settings.py из шаблона
+      template:
+        src: templates/settings.py.j2
+        dest: /opt/grid-container/django_project/settings.py
+        owner: root
+        group: root
+        mode: '0644'
+
+    # 6. Выполнение миграций базы данных
+    - name: Выполнить миграции
+      command: /opt/grid-container/venv/bin/python /opt/grid-container/manage.py migrate
+      become_user: root
+      args:
+        chdir: /opt/grid-container
+
+    # 7. Создание суперпользователя (если не существует)
+    - name: Создать суперпользователя Django
+      shell: |
+        echo "from django.contrib.auth.models import User; User.objects.filter(username='admin').exists() or User.objects.create_superuser('admin', 'admin@example.com', '{{ admin_password }}')" | /opt/grid-container/venv/bin/python /opt/grid-container/manage.py shell
+      become_user: root
+      args:
+        chdir: /opt/grid-container
+
+    # 8. Настройка systemd сервиса для запуска Django (через Gunicorn)
+    - name: Скопировать systemd unit-файл
+      template:
+        src: templates/gunicorn.service.j2
+        dest: /etc/systemd/system/gunicorn.service
+      notify: restart gunicorn
+
+    - name: Запустить и включить gunicorn
+      systemd:
+        name: gunicorn
+        state: started
+        enabled: yes
+
+    # 9. Настройка HTTPS (установка сертификата и конфигурация Nginx)
+    - name: Установить Nginx
+      apt:
+        name: nginx
+        state: present
+
+    - name: Скопировать конфигурацию Nginx из шаблона
+      template:
+        src: templates/nginx.conf.j2
+        dest: /etc/nginx/sites-available/grid
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Создать символическую ссылку для включения сайта
+      file:
+        src: /etc/nginx/sites-available/grid
+        dest: /etc/nginx/sites-enabled/grid
+        state: link
+
+    - name: Удалить дефолтный сайт
+      file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+
+    - name: Перезапустить Nginx
+      systemd:
+        name: nginx
+        state: restarted
+
+  handlers:
+    - name: restart gunicorn
+      systemd:
+        name: gunicorn
+        state: restarted

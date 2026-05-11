@@ -1,0 +1,13 @@
+[Unit]
+Description=Gunicorn instance to serve grid container
+After=network.target
+
+[Service]
+User=root
+Group=www-data
+WorkingDirectory=/opt/grid-container
+Environment="PATH=/opt/grid-container/venv/bin"
+ExecStart=/opt/grid-container/venv/bin/gunicorn --workers 3 --bind unix:/opt/grid-container/grid.sock django_project.wsgi:application
+
+[Install]
+WantedBy=multi-user.target

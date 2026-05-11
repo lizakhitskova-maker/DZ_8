@@ -1,0 +1,7 @@
+django_secret_key: "your-secret-key-here"
+admin_password: "123456789"
+threshold_packets: 800
+threshold_bandwidth: 90
+domain_name: "grid.example.com"
+repo_url: "https://github.com/your-username/grid-container.git"
+repo_version: "main"
